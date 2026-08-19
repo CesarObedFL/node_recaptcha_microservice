@@ -375,15 +375,19 @@ app.get('/config', (req, res) => {
     });
 });
 
-// SERVER STARTUP
-
 /**
- * Starts the Express server
- * 
- * The server listens on 127.0.0.1 for enhanced security,
- * allowing only local applications to access it directly.
+ * Exporta la aplicación y funciones para pruebas
  */
-app.listen(port, '127.0.0.1', () => {
+module.exports = {
+  app,
+  create_assessment
+};
+
+// =========================================================================
+// INICIO DEL SERVIDOR (SOLO SI NO ESTÁ EN MODO PRUEBA)
+// =========================================================================
+if (require.main === module && process.env.NODE_ENV !== 'test') {
+  app.listen(port, '127.0.0.1', () => {
     console.log('========================================');
     console.log('✅ reCAPTCHA Microservice');
     console.log(`📡 Port: ${port}`);
@@ -396,7 +400,8 @@ app.listen(port, '127.0.0.1', () => {
     console.log(`   GET  /health   - Health check`);
     console.log(`   GET  /config   - Service configuration`);
     console.log('========================================');
-});
+  });
+}
 
 // TERMINATION SIGNAL HANDLING
 
