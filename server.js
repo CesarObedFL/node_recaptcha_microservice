@@ -3,6 +3,7 @@ const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const fetch = require ('node-fetch');
 const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise');
 
 /**
@@ -33,6 +34,11 @@ const recaptcha_key = process.env.RECAPTCHA_KEY;
  * @var {string} jwt_secret - Secret key for signing JWTs (must match the email microservice)
  */
 const jwt_secret = process.env.JWT_SECRET;
+
+/**
+ * @var {string}  -  (must match the email microservice)
+ */
+const emailMicroserviceUrl = process.env.EMAIL_MICROSERVICE_URL || 'http://localhost:3000';
 
 /**
  * Verifies that all required environment variables are defined
@@ -206,52 +212,47 @@ async function create_assessment({
  * 
  * @returns {Object} JSON response
  * @returns {boolean} success - Indicates if verification was successful and JWT was generated
- * @returns {string} token - Generated JWT (only if success = true)
  * @returns {number} score - reCAPTCHA score
  * @returns {Array} reasons - Score reasons
  * @returns {string} error - Error message (only if success = false)
- * 
- * @example
- * // Successful request
- * POST /verify
- * {
- *   "token": "03AFcWeA5p2...",
- *   "recaptcha_action": "send_email_form",
- *   "user_ip": "192.168.1.100"
- * }
- * 
- * // Successful response
- * {
- *   "success": true,
- *   "token": "eyJhbGciOiJIUzI1NiIs...",
- *   "score": 0.9,
- *   "reasons": []
- * }
  */
 app.post('/verify', async (req, res) => {
-    console.log('📩 Request received at /verify');
+    console.log('📩 Petición recibida en /verify');
 
-    // Extract data from the request body
+    // Extraer datos del cuerpo de la petición (incluyen los del formulario)
     const {
         token,
         recaptcha_action = 'send_email_form',
         user_ip,
         user_agent = 'unknown',
         ja4 = '',
-        ja3 = ''
+        ja3 = '',
+        full_name,
+        email: clientEmail,
+        subject,
+        message
     } = req.body;
 
-    // Validate that the token is present
+    // Validar que el token esté presente
     if (!token) {
-        console.warn('⚠️ Request without token');
+        console.warn('⚠️ Petición sin token');
         return res.status(400).json({
             success: false,
-            error: 'The "token" field is required'
+            error: 'El campo "token" es requerido'
+        });
+    }
+
+    // Validar que los datos del formulario estén completos
+    if (!full_name || !clientEmail || !subject || !message) {
+        console.warn('⚠️ Faltan datos del formulario');
+        return res.status(400).json({
+            success: false,
+            error: 'Los campos full_name, email, subject y message son requeridos'
         });
     }
 
     try {
-        // 1. Perform the reCAPTCHA assessment
+        // 1. Realizar la evaluación de reCAPTCHA
         const assessment_result = await create_assessment({
             token: token,
             recaptcha_action: recaptcha_action,
@@ -261,13 +262,12 @@ app.post('/verify', async (req, res) => {
             ja3: ja3
         });
 
-        // 2. Check if the assessment was valid
+        // 2. Verificar si la evaluación fue válida
         if (!assessment_result.valid) {
-            console.warn('⚠️ reCAPTCHA assessment failed:', assessment_result.error);
-            
+            console.warn('⚠️ Evaluación de reCAPTCHA fallida:', assessment_result.error);
             return res.status(400).json({
                 success: false,
-                error: assessment_result.error || 'reCAPTCHA verification failed',
+                error: assessment_result.error || 'Verificación de reCAPTCHA fallida',
                 score: assessment_result.score,
                 reasons: assessment_result.reasons
             });
@@ -275,19 +275,18 @@ app.post('/verify', async (req, res) => {
 
         const score = assessment_result.score;
 
-        // 3. Verify that the score is sufficient (threshold: 0.5)
+        // 3. Verificar que la puntuación sea suficiente (umbral: 0.5)
         if (score < 0.5) {
-            console.warn(`⚠️ Low score: ${score} (threshold: 0.5)`);
-            
+            console.warn(`⚠️ Puntuación baja: ${score} (umbral: 0.5)`);
             return res.status(400).json({
                 success: false,
-                error: 'reCAPTCHA score is too low (minimum threshold: 0.5)',
+                error: 'Puntuación de reCAPTCHA demasiado baja (umbral mínimo: 0.5)',
                 score: score,
                 reasons: assessment_result.reasons
             });
         }
 
-        // 4. Generate JWT (since verification was successful)
+        // 4. Generar JWT (ya que la verificación fue exitosa)
         const jwt_payload = {
             verified: true,
             type: 'email_verification'
@@ -296,25 +295,57 @@ app.post('/verify', async (req, res) => {
         const jwt_token = jwt.sign(
             jwt_payload,
             jwt_secret,
-            { expiresIn: '5m' } // Token expires in 5 minutes for security
+            { expiresIn: '5m' } // El token expira en 5 minutos por seguridad
         );
 
-        console.log(`✅ Verification successful - Score: ${score}, JWT generated`);
+        console.log(`✅ Verificación exitosa - Score: ${score}, JWT generado`);
 
-        // 5. Return the JWT to the frontend
+        // =============================================================
+        // 5. NUEVO: Llamar al microservicio de email con el JWT
+        // =============================================================
+        const emailPayload = {
+            full_name,
+            email: clientEmail,
+            subject,
+            message
+        };
+
+        console.log(`📤 Enviando petición al microservicio de email: ${emailMicroserviceUrl}/request`);
+
+        const emailResponse = await fetch(`${emailMicroserviceUrl}/request`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwt_token}`
+            },
+            body: JSON.stringify(emailPayload)
+        });
+
+        // Leer la respuesta del microservicio de email
+        const emailResult = await emailResponse.json();
+
+        if (!emailResponse.ok) {
+            // Si el email microservice devuelve un error, lo propagamos
+            console.error('❌ Error del microservicio de email:', emailResult);
+            return res.status(emailResponse.status).json({
+                success: false,
+                error: emailResult.error || 'Error al enviar el correo',
+                details: emailResult
+            });
+        }
+
+        // 6. Todo fue bien: devolver éxito al frontend (sin JWT)
+        console.log('✅ Correo enviado exitosamente a través del microservicio de email');
         return res.json({
             success: true,
-            token: jwt_token,
-            score: score,
-            reasons: assessment_result.reasons
+            message: 'Mensaje enviado correctamente'
         });
 
     } catch (error) {
-        console.error('❌ Error in /verify:', error.message);
-        
+        console.error('❌ Error en /verify:', error.message);
         return res.status(500).json({
             success: false,
-            error: 'Internal error verifying reCAPTCHA',
+            error: 'Error interno al procesar la solicitud',
             details: error.message
         });
     }
@@ -354,24 +385,10 @@ app.get('/health', (req, res) => {
  * @route GET /config
  * @returns {Object} Service configuration
  * @returns {number} port - Port where the service is running
- * @returns {string} project_id - Google Cloud project ID
- * @returns {string} jwt_secret_status - JWT secret status (defined or not)
- * 
- * @example
- * GET /config
- * 
- * // Response
- * {
- *   "port": 5000,
- *   "project_id": "portfolio-1737941968535",
- *   "jwt_secret_status": "defined"
- * }
  */
 app.get('/config', (req, res) => {
     res.json({
-        port: port,
-        project_id: project_id,
-        jwt_secret_status: jwt_secret ? 'defined' : 'not defined'
+        port: port
     });
 });
 
