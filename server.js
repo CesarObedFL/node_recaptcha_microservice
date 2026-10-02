@@ -3,7 +3,7 @@ const dotenv = require('dotenv');
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const fetch = require ('node-fetch');
+const fetch = require('node-fetch');
 const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise');
 
 /**
@@ -148,7 +148,7 @@ async function create_assessment({
         if (!response.tokenProperties.valid) {
             const invalid_reason = response.tokenProperties.invalidReason || 'unknown';
             console.log(`❌ Invalid token: ${invalid_reason}`);
-            
+
             return {
                 valid: false,
                 score: 0,
@@ -160,7 +160,7 @@ async function create_assessment({
         // Verify that the action matches
         if (response.tokenProperties.action !== recaptcha_action) {
             console.log(`❌ Expected action "${recaptcha_action}" but received "${response.tokenProperties.action}"`);
-            
+
             return {
                 valid: false,
                 score: response.riskAnalysis?.score || 0,
@@ -184,7 +184,7 @@ async function create_assessment({
 
     } catch (error) {
         console.error('❌ Error in create_assessment:', error.message);
-        
+
         return {
             valid: false,
             score: 0,
@@ -396,28 +396,28 @@ app.get('/config', (req, res) => {
  * Exporta la aplicación y funciones para pruebas
  */
 module.exports = {
-  app,
-  create_assessment
+    app,
+    create_assessment
 };
 
 // =========================================================================
 // INICIO DEL SERVIDOR (SOLO SI NO ESTÁ EN MODO PRUEBA)
 // =========================================================================
 if (require.main === module && process.env.NODE_ENV !== 'test') {
-  app.listen(port, '127.0.0.1', () => {
-    console.log('========================================');
-    console.log('✅ reCAPTCHA Microservice');
-    console.log(`📡 Port: ${port}`);
-    console.log(`📁 Project: ${project_id}`);
-    console.log(`🔑 JWT Secret: ${jwt_secret ? 'defined ✅' : 'not defined ❌'}`);
-    console.log('========================================');
-    console.log(`🌐 Server running at http://127.0.0.1:${port}`);
-    console.log(`🔗 Available endpoints:`);
-    console.log(`   POST /verify   - Verify reCAPTCHA token and generate JWT`);
-    console.log(`   GET  /health   - Health check`);
-    console.log(`   GET  /config   - Service configuration`);
-    console.log('========================================');
-  });
+    app.listen(port, '127.0.0.1', () => {
+        console.log('========================================');
+        console.log('✅ reCAPTCHA Microservice');
+        console.log(`📡 Port: ${port}`);
+        console.log(`📁 Project: ${project_id}`);
+        console.log(`🔑 JWT Secret: ${jwt_secret ? 'defined ✅' : 'not defined ❌'}`);
+        console.log('========================================');
+        console.log(`🌐 Server running at http://127.0.0.1:${port}`);
+        console.log(`🔗 Available endpoints:`);
+        console.log(`   POST /verify   - Verify reCAPTCHA token and generate JWT`);
+        console.log(`   GET  /health   - Health check`);
+        console.log(`   GET  /config   - Service configuration`);
+        console.log('========================================');
+    });
 }
 
 // TERMINATION SIGNAL HANDLING

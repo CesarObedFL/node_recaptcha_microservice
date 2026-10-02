@@ -1,0 +1,6 @@
+# pnpm-workspace.yaml
+packages:
+  - "."
+  
+overrides:
+  jest-environment-node: "30.4.0"
