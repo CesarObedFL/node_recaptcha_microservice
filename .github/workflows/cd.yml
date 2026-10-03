@@ -1,0 +1,76 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 20.x
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install --prefer-frozen-lockfile --ignore-workspace
+
+      - name: Run tests
+        run: pnpm test
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-secret-key-for-jest
+          PROJECT_ID: test-project-id
+          RECAPTCHA_KEY: test-recaptcha-key
+          CLIENT_URL: http://localhost:5173
+          EMAIL_MICROSERVICE_URL: http://localhost:3000
+
+      # 5. Desplegar via SSH
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            echo "🚀 starting deployment..."
+
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "📂 current directory: $(pwd)"
+
+            echo "📥 downloading changes..."
+            git pull origin main
+
+            if [ ! -f .env ]; then
+              echo "❌ ERROR: .env file doesn't exist. Abort deployment"
+              exit 1
+            fi
+
+            echo "📦 install dependencies..."
+            pnpm install --prefer-frozen-lockfile --ignore-workspace --prod
+
+            echo "🔄 reload service..."
+            pm2 reload ${{ secrets.PM2_APP_NAME }} --update-env || pm2 restart ${{ secrets.PM2_APP_NAME }} --update-env
+
+            pm2 save
+
+            echo "✅ Deployment successfull..."
+            pm2 list | grep ${{ secrets.PM2_APP_NAME }} || true
